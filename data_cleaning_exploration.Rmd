@@ -1,0 +1,372 @@
+---
+title: "Goodreads Project"
+author: "Anum Damani"
+date: "2024-05-11"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Dataset link: https://www.kaggle.com/datasets/cristaliss/ultimate-book-collection-top-100-books-up-to-2023
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+goodreads <- read.csv("/Users/anumdamani/goodreads_data.csv")
+colnames(goodreads)
+nrow(goodreads)
+ncol(goodreads)
+num_unique <- length(unique(goodreads$publisher))
+print(num_unique)
+```
+
+Creating a new variable called main_genre:
+
+```{r}
+library(dplyr)
+library(stringr)
+
+class(goodreads$genres)
+str(goodreads$genres)
+
+# converting the genres column to a list
+goodreads$genres <- lapply(goodreads$genres, function(x) strsplit(gsub("\\[|\\]|'", "", x), ", "))
+
+class(goodreads$genres)
+
+# now making a new column called main_genre
+goodreads$main_genre <- sapply(goodreads$genres, function(genres) genres[[1]][1])
+
+head(goodreads)
+
+list_columns <- sapply(goodreads, function(x) is.list(x))
+
+# Remove columns with lists
+goodreads_cleaned <- goodreads[, !list_columns]
+
+# Save the cleaned dataframe as CSV
+#write.csv(goodreads_cleaned, "goodreads_cleaned.csv", row.names = FALSE)
+
+# Find the index of the book "Infatuation" by Nicole Edwards
+book_index <- which(goodreads_cleaned$title == "Infatuation" & goodreads_cleaned$authors == "Nicole Edwards")
+
+# Update the main_genre for the book
+
+goodreads_cleaned$main_genre[book_index] <- "Romance"
+
+print(goodreads_cleaned[book_index, c("title", "authors", "main_genre")])
+
+print(table(goodreads_cleaned$main_genre))
+```
+
+
+Created a new variable called "year" based on the "publication_date" variable:
+
+```{r}
+max(goodreads_cleaned$rating_score)
+
+# Convert publication_date to Date object
+goodreads_cleaned$publication_date <- as.Date(goodreads_cleaned$publication_date, format = "%B %d, %Y")
+
+# Extract year from publication_date
+goodreads_cleaned$year <- format(goodreads_cleaned$publication_date, "%Y")
+#write.csv(goodreads_cleaned, "goodreads_cleaned.csv", row.names = FALSE)
+```
+
+
+
+Grouping by publisher to see the number of book they published and average rating for publisher:
+
+```{r}
+# Grouping by publisher
+grouped_by_publisher <- goodreads_cleaned %>% 
+  group_by(publisher) %>%
+  summarise(
+    total_books = n(),
+    average_rating = mean(rating_score, na.rm = TRUE)
+  ) %>%
+  arrange(desc(total_books))  # Sorting by total number of books in each publisher
+
+# Displaying the grouped data
+#print(grouped_by_publisher)
+```
+
+
+```{r}
+goodreads_cleaned %>%
+  filter(series_title == "Unfinished Hero" & publisher == "Amazon Digital Services") %>%
+  mutate(main_genre = "Romance")
+
+#unique(goodreads_cleaned$main_genre)
+
+row_index <- which(goodreads_cleaned$series_title == "Unfinished Hero" & goodreads_cleaned$publisher == "Amazon Digital Services")
+if (length(row_index) > 0) {
+  goodreads_cleaned[row_index, "main_genre"] <- "Romance"
+}
+
+#unique(goodreads_cleaned$main_genre)
+```
+
+Condensing the main_genre column further:
+
+```{r}
+# condensing the main_genre column further
+# Define genre mappings
+genre_mappings <- list(
+  "Fantasy" = c("Fantasy", "Urban Fantasy", "Paranormal", "Vampires", "Dystopia", "Mythology"),
+  "Romance" = c("Romance", "Historical Romance", "Paranormal Romance", "Category Romance", "Contemporary Romance", "M M Romance", "Sports Romance", "Dark", "Erotica", "Menage", "BDSM", "Reverse Harem"),
+  "Mystery/Thriller" = c("Mystery", "Thriller", "Crime"),
+  "Science Fiction" = c("Science Fiction", "Space", "Time Travel", "Star Trek", "Star Wars"),
+  "Nonfiction" = c("Business", "History", "Biography", "Nonfiction", "Science", "Cookbooks", "Politics", "Travel", "Music", "Philosophy", "Religion", "Art", "Design", "Education", "Essays", "Baseball", "Psychology", "Film"),
+  "Children/Young Adult" = c("Picture Books", "Childrens", "Young Adult", "Animals", "Sports"),
+  "Comics/Graphic Novels" = c("Manga", "Graphic Novels", "Comics"),
+  "Humor" = c("Humor"),
+  "Self Help" = c("Self Help", "Parenting", "Writing", "Memoir", "Spirituality")
+)
+
+# Create a function to map genres to broader categories
+map_to_broad_genre <- function(genre) {
+  for (broad_genre in names(genre_mappings)) {
+    if (genre %in% genre_mappings[[broad_genre]]) {
+      return(broad_genre)
+    }
+  }
+  return("Other")
+}
+
+# Apply the mapping function to the main_genre column
+goodreads_cleaned$main_genre <- sapply(goodreads_cleaned$main_genre, map_to_broad_genre)
+
+#unique(goodreads_cleaned$main_genre)
+
+#write.csv(goodreads_cleaned, "goodreads_cleaned.csv", row.names = FALSE)
+```
+
+Cleaning up the format column:
+
+```{r}
+# cleaning up the format column
+unique(goodreads_cleaned$format)
+
+library(dplyr)
+
+# Define a function to merge similar formats
+merge_formats <- function(format) {
+  format <- tolower(format)  # Convert format to lowercase for consistency
+  merged_format <- ifelse(
+    format %in% c("hardcover", "slipcased hardcover", "library binding", "board book"), "Hardcover",
+    ifelse(
+      format %in% c("paperback", "mass market paperback", "trade paperback", "broschiert", "paper"), "Paperback",
+      ifelse(
+        format %in% c("kindle edition", "ebook", "nook"), "Ebook",
+        ifelse(
+          format %in% c("audio cassette", "audio cd", "audiobook"), "Audiobook",
+          format  # Keep other formats unchanged
+        )
+      )
+    )
+  )
+  return(merged_format)
+}
+
+
+# Apply the merge_formats function to the format column
+goodreads_cleaned <- goodreads_cleaned %>%
+  mutate(format = merge_formats(format))
+
+# Check the unique values of the format column after merging
+unique_formats <- unique(goodreads_cleaned$format)
+
+#write.csv(goodreads_cleaned, "goodreads_cleaned.csv", row.names = FALSE)
+```
+
+
+Creating a plot to just explore main_genre:
+
+```{r}
+# Filter data for Romance genre
+romance_data <- goodreads_cleaned %>%
+  filter(main_genre == "Romance")
+
+# Calculate average rating per year
+avg_rating_per_year <- romance_data %>%
+  group_by(year) %>%
+  summarise(avg_rating = mean(rating_score, na.rm = TRUE))
+
+# Plot average rating per year for Romance genre as a bar plot
+ggplot(avg_rating_per_year, aes(x = year, y = avg_rating)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Average Rating per Year for Romance Genre",
+       x = "Year",
+       y = "Average Rating") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# min of price
+filtered_data_price <- goodreads_cleaned %>%
+  filter(!is.na(price))
+min(filtered_data_price$price)
+max(filtered_data_price$price)
+# Assuming your dataset is named goodreads_cleaned
+goodreads_cleaned <- goodreads_cleaned %>%
+  mutate(price_category = case_when(
+    price == 0 ~ "Free",
+    price > 0 & price <= 5 ~ "Low",
+    price > 5 & price <= 15 ~ "Medium",
+    price > 15 & price <= 29.99 ~ "High",
+    TRUE ~ "Unknown"  # Default category for other cases
+  ))
+```
+
+
+I manually looked through the publisher list and combined publishers with the same name or had several variations for the same name:
+
+
+```{r}
+goodreads_cleaned2 <- read.csv("/Users/anumdamani/stats422/web_app_project/goodreads_cleaned2.csv")
+nrow(goodreads_cleaned2)
+head(goodreads_cleaned2)
+
+# cleaning up publisher names
+# combining Berkley and BerkleyBooks
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "BerkleyBooks", "Berkley", publisher))
+
+# combining Atria and Atria Books
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Atria Books", "Atria", publisher))
+
+# combining BallantineBooks and Ballantine Books with Ballantine
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "BallantineBooks", "Ballantine", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Ballantine Books", "Ballantine", publisher))
+
+# combining Broadway Books with Broadway
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Broadway Books", "Broadway", publisher))
+
+# same process for Faber & Faber
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Faber & Faber Ltd", "Faber & Faber", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Faber and Faber", "Faber & Faber", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Faber Faber", "Faber & Faber", publisher))
+
+# Grand Central
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Grand Central Pub", "Grand Central", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Grand Central Publishing", "Grand Central", publisher))
+
+# Henry Holt & Company
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Henry Holt & Company, Inc.", "Henry Holt & Company", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Henry Holt and Co.", "Henry Holt & Company", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Henry Holt and Company", "Henry Holt & Company", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Henry Holt Company", "Henry Holt & Company", publisher))
+
+
+# Hodder & Stoughton
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Hodder & Stoughton Ltd", "Hodder & Stoughton", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Hodder and Stoughton", "Hodder & Stoughton", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Hodder and Stoughton Ltd", "Hodder & Stoughton", publisher))
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Hodder and Stoughton Ltd.", "Hodder & Stoughton", publisher))
+
+
+# Hyperion
+goodreads_cleaned2 <- goodreads_cleaned2 %>% 
+  mutate(publisher = ifelse(publisher == "Hyperion Books", "Hyperion", publisher))
+```
+
+Selecting certain publishers I want to highlight in my web app:
+
+
+```{r}
+# now just select certain publishers
+goodreads_cleaned2 <- goodreads_cleaned2 %>% filter(publisher %in% c("Grand Central", "Harper", 
+                                                                     "Harper Perennial", "Harper Perennial Modern Classics", 
+                                                                     "Henry Holt & Company", "Scholastic",
+                                                                     "HarperCollins", "Simon & Schuster", "Penguin",
+                                                                     "Berkley", "Atria", "G.P. Putnam's Sons",
+                                                                     "Hachette Books", "Random House", "Alfred A. Knopf",
+                                                                     "Ballantine", "Bloomsbury", "Broadway",
+                                                                     "Crown", "Faber & Faber", "Hodder & Stroughton",
+                                                                     "Hyperion"))
+
+# Print the filtered data frame
+#print(goodreads_cleaned2)
+
+
+# Save the filtered data frame to a new CSV file
+#write.csv(goodreads_cleaned2, "goodreads_cleaned2.csv", row.names = FALSE)
+
+# Print the filtered data frame
+#print(goodreads_cleaned2)
+```
+
+
+Counting number of books in each genre:
+
+```{r}
+goodreads_cleaned2 <- read.csv("/Users/anumdamani/stats422/web_app_project/goodreads_cleaned2.csv") 
+
+genre_count <- goodreads_cleaned2 %>%
+  group_by(main_genre) %>%
+  summarise(num_books = n())
+```
+
+Checking the "want to read" variable for missing values. I looked up the books on Goodreads and manually filled in the missing values with the actual numbers:
+
+```{r}
+# Check for NA values in a specific column of a dataset
+na_values <- is.na(goodreads_cleaned2$want_to_read)
+
+# Count the number of NA values
+num_na <- sum(na_values)
+
+# Print the number of NA values
+print(num_na)
+
+books_with_missing_want_to_read <- goodreads_cleaned2[is.na(goodreads_cleaned2$want_to_read), ]
+
+
+# Impute missing values with the mean
+#want_to_read_mean <- mean(dataset$want_to_read, na.rm = TRUE)
+#dataset$want_to_read[is.na(dataset$want_to_read)] <- want_to_read_mean
+
+
+goodreads_cleaned2[56, "want_to_read"]  # proof by dick francis
+goodreads_cleaned2[74, "want_to_read"]  # sweet starfire by jayne ann krentz
+goodreads_cleaned2[144, "want_to_read"] # time bomb by jonathan kellerman
+goodreads_cleaned2[256, "want_to_read"] # someone like you by sarah dessen
+goodreads_cleaned2[308, "want_to_read"] # blood lure by nevada barr
+goodreads_cleaned2[452, "want_to_read"] # Game Change: Obama and the Clintons, McCain and Palin, and the Race of a Lifetime
+
+goodreads_cleaned2[56, "want_to_read"] <- 1443 # proof by dick francis
+goodreads_cleaned2[74, "want_to_read"] <- 1990 # sweet starfire by jayne ann krentz
+goodreads_cleaned2[144, "want_to_read"] <- 4246 # time bomb by jonathan kellerman
+goodreads_cleaned2[256, "want_to_read"] <- 266 # someone like you by sarah dessen
+goodreads_cleaned2[308, "want_to_read"] <- 1518 # blood lure by nevada barr
+goodreads_cleaned2[452, "want_to_read"] <- 9974 # Game Change: Obama and the Clintons, McCain and Palin, and the Race of a Lifetime	 by john heilemann
+
+goodreads_cleaned2[is.na(goodreads_cleaned2$want_to_read), ]
+
+
+#write.csv(goodreads_cleaned2, "goodreads_cleaned2.csv", row.names = FALSE)
+```
+
